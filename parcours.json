@@ -1,0 +1,353 @@
+{
+  "_aide": {
+    "but": "Plages de navigation du club pour chaque parcours. C'est la seule donnée que le site ne peut pas trouver en ligne : sans elle, il montre les débits mais ne peut pas dire où pagayer.",
+    "plage": "Quatre seuils, dans l'unité de la station. En dessous de min : trop bas. De min à ideal_min : limite. De ideal_min à ideal_max : ça passe. De ideal_max à max : limite. Au-dessus de max : trop haut. Laisse null ce que tu ne sais pas : le site affichera la mesure sans classement.",
+    "unite": "m3/s pour une station qui mesure le débit. cm pour une station qui ne mesure que la hauteur, lue sur l'échelle Vigicrues de la station (0,43 m affiché = 43 cm).",
+    "regule": "true si des lâchers de barrage ou des éclusées font varier le débit dans la journée, false sinon, null si on ne sait pas.",
+    "type": "journee : sortie à la journée depuis le club. sejour : rivière de week-end ou de stage.",
+    "releves": "Sorties du journal de bord du club : valeur notée ce jour-là (relevé ponctuel, pas une moyenne journalière) et ce qui a été dit du niveau.",
+    "verification": "Comparaison faite le 04/11/2026 entre les valeurs du carnet et les mesures Hub'Eau de la station (débit moyen journalier, et débit ou hauteur maximal du jour)."
+  },
+  "parcours": [
+    {
+      "id": "dranse-classique",
+      "riviere": "Dranse",
+      "troncon": "Classique",
+      "classe": "3",
+      "type": "journee",
+      "regule": true,
+      "embarquement": { "nom": "Classique", "carte": "https://maps.app.goo.gl/6BC7vXv6WRKzxFMs6" },
+      "debarquement": { "nom": "AN (ou Frogs ; Vongy pour la version longue)", "carte": null },
+      "station": { "code": "V033401001", "nom": "La Dranse à Reyvroz [Bioge]", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 20→21,4 (30/08/25), 22→22,2 (06/09/25), 33→32,4 (12/04/26), 28→29,0 (16/05/26). Exception : 10 noté le 07/03/26 pour une moyenne de 17,9 ce jour-là.",
+      "releves": [
+        { "date": "2025-08-30", "valeur": 20, "ressenti": "Niveau super sympa pour naviguer à vue sans prise de tête." },
+        { "date": "2025-09-06", "valeur": 22, "ressenti": "Niveau plutôt ludique pour descendre sans pression ; peu de vagues pour jouer." },
+        { "date": "2025-09-06", "valeur": 26, "ressenti": "Classique + Vongy. Très bon débit, ça passe partout. (Date à vérifier : la ligne est rangée entre deux sorties de juin 2025.)" },
+        { "date": "2025-12-06", "valeur": 14, "ressenti": "Petite navigation tranquille." },
+        { "date": "2025-12-13", "valeur": 17, "ressenti": "Bonne navigation sans stress (deux descentes)." },
+        { "date": "2026-03-07", "valeur": 10, "ressenti": "Arbre en travers à couper ; rien sur le niveau." },
+        { "date": "2026-04-12", "valeur": 33, "ressenti": "Beaucoup d'eau, ça pousse plutôt fort, mais ça passe partout." },
+        { "date": "2026-05-16", "valeur": 28, "ressenti": null }
+      ]
+    },
+    {
+      "id": "dranse-ex-classique",
+      "riviere": "Dranse",
+      "troncon": "Ex + Classique",
+      "classe": "3/4",
+      "type": "journee",
+      "regule": true,
+      "embarquement": { "nom": "Au-dessus du Pont romain", "carte": null },
+      "debarquement": { "nom": "AN (ou Frogs)", "carte": null },
+      "station": { "code": "V033401001", "nom": "La Dranse à Reyvroz [Bioge]", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 29→30,6 (27/09/25), 17-25→19,7 (08/11/25), 30→30,5 (11/04/26). Les 29/08 et 10/09/26, jours de lâcher, la moyenne du jour (5,5 et 6,4) est bien sous la valeur notée (10) ; le maximum du jour était de 19,8 et 12,2.",
+      "releves": [
+        { "date": "2025-08-30", "valeur": 20, "ressenti": "Repérage de la passe à Morel et du Rappel ; portage de la grotte et de la passe à Morel." },
+        { "date": "2025-09-20", "valeur": 9, "ressenti": "Peu d'eau. Le seuil après le portage ne laisse pas la place pour gicler ; pissette seulement à gauche. Plutôt facile, même les Ex." },
+        { "date": "2025-09-27", "valeur": 29, "ressenti": "Joli niveau, beau train de vagues qui lisse pas mal les Ex. Passe à Morel toujours mauvaise à ce niveau. Classique super sympa." },
+        { "date": "2025-11-08", "valeur": 17, "ressenti": "Monté de près de 10 m³/s pendant la navette. Joli niveau : ça pousse sur les Ex et ça envoie sur la classique." },
+        { "date": "2026-04-11", "valeur": 30, "ressenti": "Super niveau, très joueur sur la classique, pousse très fort sur les Ex." },
+        { "date": "2026-06-06", "valeur": 13, "ressenti": "Ex au top, pas de rappel." },
+        { "date": "2026-08-29", "valeur": 10, "ressenti": "Jour de lâcher. Navigation à l'aise sur les Ex." },
+        { "date": "2026-09-10", "valeur": 10, "ressenti": "Jour de lâcher. RAS." }
+      ]
+    },
+    {
+      "id": "arve-petit-canada",
+      "riviere": "Arve",
+      "troncon": "Petit Canada",
+      "classe": "2+",
+      "type": "journee",
+      "regule": true,
+      "embarquement": { "nom": "Contamine-sur-Arve", "carte": "https://maps.app.goo.gl/WbeKypKswKRCF2vT7" },
+      "debarquement": { "nom": "Pont d'Arthaz", "carte": "https://maps.app.goo.gl/n6ins5gQ3SzhcFmJ8" },
+      "station": { "code": "V020542201", "nom": "L'Arve à Bonneville", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "autres_stations": [
+        { "code": "V022000201", "nom": "L'Arve à Reignier-Ésery [Arthaz]", "role": "Au débarquement. Moyennes journalières proches de Bonneville (+0 à +25 %)." }
+      ],
+      "verification": "À confirmer : quelle station le club lit-il ? Le carnet cite Bonneville une fois (06/06/25). Les valeurs notées sont souvent sous la moyenne du jour (25 pour 38,9 le 04/10/25 ; 14 pour 25,0 le 18/10/25) : l'Arve varie beaucoup dans la journée (14 → 40 m³/s à Bonneville le 03/11/26).",
+      "releves": [
+        { "date": "2025-06-06", "valeur": 120, "ressenti": "Beaucoup de débit : bien lisse, presque pas de vagues ni de surf, peu de contres, récupérations difficiles. Trop simple pour apprendre. (150 m³/s à Genève.)" },
+        { "date": "2025-10-04", "valeur": 25, "ressenti": "Débit très intéressant : le stop à Félix est praticable, la vague du pont d'Arthaz se surfe." },
+        { "date": "2025-10-18", "valeur": 14, "ressenti": "Très faible débit mais très intéressant : veines marquées pour travailler, vague du stop à Félix très sympa." },
+        { "date": "2026-04-19", "valeur": 80, "ressenti": "Plutôt compliqué pour les débutants ; deux contres et la dernière vague pour travailler." },
+        { "date": "2026-10-25", "valeur": 27, "ressenti": null }
+      ]
+    },
+    {
+      "id": "arve-etrembieres",
+      "riviere": "Arve",
+      "troncon": "Étrembières (bassin du club)",
+      "classe": "2+/3",
+      "type": "journee",
+      "regule": true,
+      "embarquement": { "nom": "Bassin du club", "carte": null },
+      "debarquement": { "nom": "Bassin du club", "carte": null },
+      "station": { "code": "V022000201", "nom": "L'Arve à Reignier-Ésery [Arthaz]", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "autres_stations": [
+        { "code": "2170", "nom": "L'Arve à Genève, Bout du Monde (OFEV)", "role": "En aval, mesure aussi la température de l'eau." }
+      ],
+      "verification": "Une seule sortie : 85 noté le 09/06/25 ; moyennes du jour 107 à Bonneville, 131 à Arthaz. Station à confirmer.",
+      "releves": [
+        { "date": "2025-06-09", "valeur": 85, "ressenti": "Gros débit, école de pagaie sur le bassin du club." }
+      ]
+    },
+    {
+      "id": "giffre-curtets-samoens",
+      "riviere": "Giffre",
+      "troncon": "Curtets – Samoëns",
+      "classe": "2+/3",
+      "type": "journee",
+      "regule": false,
+      "embarquement": { "nom": "En bas des Curtets (46.05761, 6.78631)", "carte": null },
+      "debarquement": { "nom": "Sous le rapide Tagada, ou au Kern (Samoëns)", "carte": null },
+      "station": { "code": "V012000202", "nom": "Le Giffre à Samoëns", "mesure": "hauteur" },
+      "unite": "cm",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "autres_stations": [
+        { "code": "V015401001", "nom": "Le Giffre à Marignier [Plan Séraphin]", "role": "En aval, mesure le débit : seule source pour la prévision et les tendances (Samoëns ne mesure que la hauteur)." }
+      ],
+      "verification": "Station confirmée : les cm du carnet se lisent sur l'échelle de Samoëns, environ 10 cm sous le maximum du jour (43 pour 0,54 m le 05/10/25 ; 65 et 63 pour 0,75 et 0,73 m les 30-31/05/26). Ces jours-là, Marignier débitait 12,2 et 10,7 m³/s.",
+      "releves": [
+        { "date": "2025-10-05", "valeur": 43, "ressenti": "Faible niveau qui gratte pas mal ; une seule ligne pour l'entrée des gorges. Peu de jeu à part la petite vague et le petit rappel après les gorges." },
+        { "date": "2026-05-30", "valeur": 65, "ressenti": "La dalle de rappel n'est pas formée. Joli train de vagues, quelques surfs." },
+        { "date": "2026-05-31", "valeur": 63, "ressenti": "Pareil que la veille." }
+      ]
+    },
+    {
+      "id": "giffre-des-fonts",
+      "riviere": "Giffre des Fonts",
+      "troncon": "Cascade du Rouget – Samoëns",
+      "classe": "3/4",
+      "type": "journee",
+      "regule": false,
+      "embarquement": { "nom": "Sous le pont vers la cascade du Rouget", "carte": null },
+      "debarquement": { "nom": "Le Kern (Samoëns)", "carte": null },
+      "station": { "code": "V012000202", "nom": "Le Giffre à Samoëns", "mesure": "hauteur" },
+      "unite": "cm",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Pas de station sur le Giffre des Fonts : Samoëns est en aval de la confluence, c'est un indicateur indirect.",
+      "releves": [
+        { "date": "2026-05-31", "valeur": 65, "ressenti": "Un portage d'un infran par manque d'eau. Parcours engagé et exigeant sur la première partie." }
+      ]
+    },
+    {
+      "id": "fier-naves-brogny",
+      "riviere": "Fier",
+      "troncon": "Naves – Brogny",
+      "classe": "2+/3",
+      "type": "journee",
+      "regule": false,
+      "embarquement": { "nom": "Pont de Naves", "carte": null },
+      "debarquement": { "nom": "Pont de Brogny", "carte": null },
+      "station": { "code": "V121401001", "nom": "Le Fier à Dingy-Saint-Clair", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 50→50,9 (25/10/25), 9→11,6 (08/03/26), 12→12,9 (15/03/26).",
+      "releves": [
+        { "date": "2025-10-25", "valeur": 50, "ressenti": "Super niveau d'eau. Navigation volume mais simple, pas de piège, des pleureurs à sauter partout." },
+        { "date": "2026-03-08", "valeur": 9, "ressenti": "Niveau minimum." },
+        { "date": "2026-03-15", "valeur": 12, "ressenti": "Niveau correct, plus joueur." }
+      ]
+    },
+    {
+      "id": "cheran-bas",
+      "riviere": "Chéran",
+      "troncon": "Bas Chéran (Alby-sur-Chéran – Rumilly)",
+      "classe": "2+",
+      "type": "journee",
+      "regule": false,
+      "embarquement": { "nom": "Alby-sur-Chéran", "carte": null },
+      "debarquement": { "nom": "Rumilly (karting)", "carte": null },
+      "station": { "code": "V125501001", "nom": "Le Chéran à Allèves [La Charniaz]", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée (en amont du parcours) : 20→21,6 (25/10/25), 12→13,3 (28/02/26), 11→11,1 (01/03/26).",
+      "releves": [
+        { "date": "2025-10-25", "valeur": 20, "ressenti": "Niveau agréable, pas de difficulté au-delà de l'embarquement et du rapide de la Cravate ; 1 h 30 ; adapté aux débutants. (Le carnet écrit « pour le Fier » : à vérifier.)" },
+        { "date": "2026-02-28", "valeur": 12, "ressenti": "Pas mal de bois, surtout sur la première partie, dangereux pour les débutants. Quelques surfs sympas. Facile et long." },
+        { "date": "2026-03-01", "valeur": 11, "ressenti": "Moins joueur qu'à 12 m³/s la veille." }
+      ]
+    },
+    {
+      "id": "semine-trebillet-coz",
+      "riviere": "Sémine",
+      "troncon": "Trébillet – Pont de Coz",
+      "classe": "3",
+      "type": "journee",
+      "regule": null,
+      "embarquement": { "nom": "Sous les marmites des géants (portage des marmites si peu d'eau)", "carte": null },
+      "debarquement": { "nom": "Passerelle du Pont de Coz", "carte": null },
+      "station": { "code": "V101581001", "nom": "La Semine à Châtillon-en-Michaille [Coz]", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée, au débarquement : 12 noté le 24/10/26, journée entre 9,8 et 12,3. Réagit très vite à la pluie (1,6 → 14 m³/s du 20 au 21/10/26 ; 38 m³/s le 25/10/26).",
+      "releves": [
+        { "date": "2026-10-24", "valeur": 12, "ressenti": "Beau parcours mais niveau d'eau minimum. Portage de l'infran, kayaks descendus à la corde." }
+      ]
+    },
+    {
+      "id": "isere-bourg-centron",
+      "riviere": "Isère",
+      "troncon": "Bourg-Saint-Maurice – Centron (variantes Landry, Bellentre, Aime)",
+      "classe": "3/3,5 (haut du bassin 4,5)",
+      "type": "sejour",
+      "regule": true,
+      "embarquement": { "nom": "Haut du bassin de slalom de Bourg-Saint-Maurice", "carte": null },
+      "debarquement": { "nom": "Centron (Essonia)", "carte": null },
+      "station": { "code": "W010000101", "nom": "L'Isère à Landry", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée sur le maximum du jour (lâchers d'été) : 26-27 et 28 notés les 22-23/08/25 pour des maximums de 28,3 et 28,5 (moyennes 19,5 et 21,8).",
+      "releves": [
+        { "date": "2025-07-02", "valeur": 28, "ressenti": "Bourg – Aime : départ à 28 m³/s, rapides d'Aime passés à 12 m³/s (fin du lâcher). Très simple." },
+        { "date": "2025-08-22", "valeur": 27, "ressenti": "Niveau plus faible que la fois précédente, pas de difficulté ; haut du bassin impressionnant." },
+        { "date": "2025-08-23", "valeur": 28, "ressenti": "Bellentre – Centron : niveau plutôt bas sur la fin." },
+        { "date": "2026-08-22", "valeur": 32, "ressenti": "Bellentre – Aime : joli niveau d'eau, descente cool." },
+        { "date": "2026-08-23", "valeur": 28, "ressenti": null }
+      ]
+    },
+    {
+      "id": "ubaye-ubayette-barcelonnette",
+      "riviere": "Ubaye",
+      "troncon": "Ubayette – Barcelonnette",
+      "classe": "3",
+      "type": "sejour",
+      "regule": false,
+      "embarquement": { "nom": "Ubayette", "carte": "https://maps.app.goo.gl/SozRSWnAw6NvynkL9" },
+      "debarquement": { "nom": "Barcelonnette", "carte": "https://maps.app.goo.gl/xCpBpkb7z6CsDuLp8" },
+      "station": { "code": "X043401001", "nom": "L'Ubaye à Barcelonnette", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 25,7→28,9 (30/05/25).",
+      "releves": [
+        { "date": "2025-05-30", "valeur": 25.7, "ressenti": "Rivière avec du volume, trains de vagues, plutôt simple." }
+      ]
+    },
+    {
+      "id": "ubaye-thuiles-fresquiere",
+      "riviere": "Ubaye",
+      "troncon": "Les Thuiles – La Fresquière",
+      "classe": "3/3+",
+      "type": "sejour",
+      "regule": false,
+      "embarquement": { "nom": "Les Thuiles", "carte": "https://maps.app.goo.gl/HbCqa6KxoK4UAwN39" },
+      "debarquement": { "nom": "La Fresquière", "carte": "https://maps.app.goo.gl/uggmZi3FPNQVnQB59" },
+      "station": { "code": "X045401001", "nom": "L'Ubaye au Lauzet-Ubaye [Roche-Rousse]", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 60→63,1 (31/05/25). Barcelonnette donnait 31,3 ce jour-là : le carnet lit le Lauzet.",
+      "releves": [
+        { "date": "2025-05-31", "valeur": 60, "ressenti": "Classe 3 avec pas mal de volume, du rythme, pas de passage vraiment difficile." }
+      ]
+    },
+    {
+      "id": "ubaye-martinet-lauzet",
+      "riviere": "Ubaye",
+      "troncon": "Martinet – Le Lauzet",
+      "classe": "4/4+",
+      "type": "sejour",
+      "regule": false,
+      "embarquement": { "nom": "Martinet", "carte": "https://maps.app.goo.gl/HKYUxw8Sn1cewBSt7" },
+      "debarquement": { "nom": "Le Lauzet", "carte": "https://maps.app.goo.gl/Zet6Q5zdJ3vTT813A" },
+      "station": { "code": "X045401001", "nom": "L'Ubaye au Lauzet-Ubaye [Roche-Rousse]", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 60→58,3 (30/05/25), 10→10,5 (13/09/25).",
+      "releves": [
+        { "date": "2025-05-30", "valeur": 60, "ressenti": "Gros niveau : gros trous à éviter, énorme train de vagues. Impressionnant au début mais largement faisable." },
+        { "date": "2025-09-13", "valeur": 10, "ressenti": "Très simple par rapport à la fois précédente. (Sortie « Ex du haut jusqu'au lac » : peu d'eau, beaucoup de cailloux à fleur d'eau.)" }
+      ]
+    },
+    {
+      "id": "guil-chapelue-grille",
+      "riviere": "Guil",
+      "troncon": "La Chapelue (bas de la Triple chute) – haut de la Grille",
+      "classe": "3/4",
+      "type": "sejour",
+      "regule": false,
+      "embarquement": { "nom": "La Chapelue", "carte": null },
+      "debarquement": { "nom": "Haut de la Grille", "carte": null },
+      "station": { "code": "X023000202", "nom": "Le Guil à Château-Ville-Vieille [Pont de la Chapelue]", "mesure": "hauteur" },
+      "unite": "cm",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 50 noté le 09/05/26, maximum du jour 0,56 m.",
+      "releves": [
+        { "date": "2026-05-09", "valeur": 50, "ressenti": "Deux repérages sur des passages de 4, dont la mini-grille (slalom entre cailloux à fleur d'eau). Superbe descente, très rapide." }
+      ]
+    },
+    {
+      "id": "guil-tunnel-maison-du-roy",
+      "riviere": "Guil",
+      "troncon": "Tunnel – lac de la Maison du Roy",
+      "classe": "3/4",
+      "type": "sejour",
+      "regule": false,
+      "embarquement": { "nom": "Au-dessus du tunnel", "carte": null },
+      "debarquement": { "nom": "Avant le lac (débarquement obligatoire)", "carte": null },
+      "station": { "code": "X023000202", "nom": "Le Guil à Château-Ville-Vieille [Pont de la Chapelue]", "mesure": "hauteur" },
+      "unite": "cm",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 26 noté le 12/09/25, maximum du jour 0,26 m.",
+      "releves": [
+        { "date": "2025-09-12", "valeur": 26, "ressenti": "Petit niveau qui oblige à suivre la seule ligne ; beaucoup de cailloux sous les fesses. Plutôt simple, très joli." }
+      ]
+    },
+    {
+      "id": "durance-fontenil-prelles",
+      "riviere": "Durance",
+      "troncon": "Fontenil – haut des gorges de Prelles",
+      "classe": "3/3,5",
+      "type": "sejour",
+      "regule": null,
+      "embarquement": { "nom": "Fontenil", "carte": null },
+      "debarquement": { "nom": "Haut des gorges de Prelles", "carte": null },
+      "station": { "code": "X001001002", "nom": "La Durance à Val-des-Prés [Les Alberts]", "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "verification": "Station confirmée : 14→14,7 (08/05/26).",
+      "releves": [
+        { "date": "2026-05-08", "valeur": 14, "ressenti": "Très nerveux, peu de fond mais très joli." }
+      ]
+    },
+    {
+      "id": "durance-prelles-argentiere",
+      "riviere": "Durance",
+      "troncon": "Bas des gorges de Prelles – bassin de L'Argentière",
+      "classe": "2+/3",
+      "type": "sejour",
+      "regule": null,
+      "embarquement": { "nom": "Bas des gorges de Prelles (parcours accrobranche)", "carte": null },
+      "debarquement": { "nom": "Bassin de L'Argentière-la-Bessée", "carte": null },
+      "station": { "code": null, "nom": null, "mesure": "debit" },
+      "unite": "m3/s",
+      "plage": { "min": null, "ideal_min": null, "ideal_max": null, "max": null },
+      "autres_stations": [
+        { "code": "X001561301", "nom": "La Durance à Briançon [aval] (EDF)", "role": "Ne correspond pas : 20,0 et 22,0 m³/s ces jours-là." },
+        { "code": "X013001001", "nom": "La Durance à L'Argentière-la-Bessée", "role": "Hauteur seulement." }
+      ],
+      "verification": "Station non trouvée : 48 et 54 notés les 08 et 10/05/26 ne correspondent à aucune station Hub'Eau vérifiée. D'où vient ce chiffre ?",
+      "releves": [
+        { "date": "2026-05-08", "valeur": 48, "ressenti": null },
+        { "date": "2026-05-10", "valeur": 54, "ressenti": "Belle descente ; reprises délicates au débarquement du bassin." }
+      ]
+    }
+  ],
+  "non_repris": [
+    { "sortie": "Ain, Pont d'Ain – Châtillon-la-Palud (28/09/25, 14 m³/s)", "raison": "Une seule sortie, station non cherchée." },
+    { "sortie": "Haut Verdon (68 cm) et Bachelard (16 cm), mai 2025", "raison": "Séjour ponctuel, échelle non identifiée." },
+    { "sortie": "Doron de Bozel, Brides – Moûtiers (39 cm, 03/07/25)", "raison": "Ne correspond ni à Moûtiers [Ponserand] (0,66 m) ni à Planay (0,92 m) : sans doute une échelle sur place." },
+    { "sortie": "L'Argentière-la-Bessée, bassin de slalom (33 m³/s, 12/09/25)", "raison": "Bassin plutôt que parcours." },
+    { "sortie": "Soča (juillet 2026)", "raison": "Pas de données pour la Slovénie dans le serveur." },
+    { "sortie": "Chalaux et Cure (septembre 2026)", "raison": "Morvan, séjour ponctuel, stations non cherchées." }
+  ]
+}
