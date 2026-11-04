@@ -32,6 +32,7 @@ Les stations favorites sont dans les tableaux `FAVORIS` et `SUISSE_FAVORIS` en h
 ## Déploiement
 
 Le Worker Cloudflare `vigicrues` est relié à ce dépôt : chaque push sur `main` est déployé automatiquement.
+Pour vérifier la version en ligne, ouvre https://vigicrues.gui-renard.workers.dev/ : la page affiche le numéro de version de `worker.js`.
 
 Protection facultative : ajoute une variable secrète `CLE` dans les réglages du Worker, puis utilise l'URL `.../mcp?cle=<valeur>` dans le connecteur.
 
