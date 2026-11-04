@@ -1,0 +1,8 @@
+{
+  // Le nom doit correspondre au Worker existant dans Cloudflare
+  // (https://vigicrues.gui-renard.workers.dev).
+  "name": "vigicrues",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true
+}
