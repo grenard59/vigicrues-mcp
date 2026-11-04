@@ -15,6 +15,12 @@ function obsSeries(code, g, from, to, stepMin, f) {
   return out;
 }
 
+// Coordonnées des stations simulées, et débit « naturel » de l'Arve à Bonneville (cycle de 10 jours)
+const COORDS = { V020542201: [46.077, 6.406], V033401001: [46.326, 6.586] };
+const arve = (t) => 15000 + 5000 * Math.sin((2 * Math.PI * t) / (10 * 86400e3)); // l/s
+const noonUTC = (d) => Date.parse(`${d}T12:00:00Z`);
+const dayList = (from, n) => Array.from({ length: n }, (_, i) => new Date(Date.parse(from) + i * 86400e3).toISOString().slice(0, 10));
+
 function isLacher(t) {
   const d = new Date(t);
   return d.getUTCDay() >= 1 && d.getUTCDay() <= 5 && d.getUTCHours() >= 16 && d.getUTCHours() < 19;
@@ -33,7 +39,11 @@ globalThis.fetch = async (url) => {
         { code_station: "V125501001", libelle_station: "Le Chéran à Allèves [La Charniaz]", libelle_cours_eau: "Le Chéran", libelle_commune: "ALLEVES", code_departement: "74" },
       ] };
     } else if (p.get("code_station")) {
-      body = { count: 1, data: p.get("code_station").split(",").map((c) => ({ code_station: c, libelle_station: "Station inconnue test " + c })) };
+      body = { count: 1, data: p.get("code_station").split(",").map((c) => ({
+        code_station: c,
+        libelle_station: "Station inconnue test " + c,
+        ...(COORDS[c] ? { latitude_station: COORDS[c][0], longitude_station: COORDS[c][1] } : { latitude_station: 45, longitude_station: 6 }),
+      })) };
     } else {
       body = { count: 0, data: [] };
     }
@@ -47,6 +57,7 @@ globalThis.fetch = async (url) => {
       const c = codes[0];
       if (c === "V033401001") data = obsSeries(c, "Q", from, lastObs, 15, (t) => (isLacher(t) ? 16000 + (t % 7) * 100 : 3300 + (t % 3) * 10));
       else if (c === "V031401002") data = obsSeries(c, "Q", from, lastObs, 15, (t) => 1700 + (t % 3) * 5);
+      else if (c === "V020542201") data = obsSeries(c, "Q", from, lastObs, 15, arve);
       data.sort(() => Math.random() - 0.5);
     } else if (p.get("timestep") === "60") {
       const g = p.get("grandeur_hydro");
@@ -72,9 +83,37 @@ globalThis.fetch = async (url) => {
     }
     data.reverse();
     body = { count: data.length, data };
+  } else if (u.hostname === "flood-api.open-meteo.com") {
+    // GloFAS simulé : 30 jours passés + aujourd'hui + horizon ; quantiles seulement pour la prévision
+    const lat = Number(p.get("latitude"));
+    const past = Number(p.get("past_days"));
+    const fwd = Number(p.get("forecast_days"));
+    const today = new Date(NOW).toISOString().slice(0, 10);
+    const time = dayList(new Date(Date.parse(today) - past * 86400e3).toISOString().slice(0, 10), past + fwd);
+    const model = (d) => {
+      if (lat === 46.077) return (1.5 * arve(noonUTC(d))) / 1000; // Arve : même forme, surestimée ×1,5
+      if (lat === 46.19) return 30; // Arve à Genève : modèle plat
+      return 9 + (Number(d.slice(8, 10)) % 5) * 0.4; // Dranse : sans rapport avec les lâchers
+    };
+    const isFut = (d) => d >= today;
+    body = {
+      latitude: lat, longitude: Number(p.get("longitude")), daily_units: { river_discharge: "m³/s" },
+      daily: {
+        time,
+        river_discharge: time.map(model),
+        river_discharge_median: time.map((d) => (isFut(d) ? model(d) : null)),
+        river_discharge_p25: time.map((d) => (isFut(d) ? model(d) * 0.8 : null)),
+        river_discharge_p75: time.map((d) => (isFut(d) ? model(d) * 1.25 : null)),
+      },
+    };
+  } else if (u.hostname === "api.open-meteo.com") {
+    assert.equal(p.get("timezone"), "Europe/Paris");
+    const n = Number(p.get("forecast_days"));
+    const time = dayList(new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Paris" }).format(NOW), n);
+    body = { daily: { time, precipitation_sum: time.map((_, i) => (i === 2 ? 14.2 : i)), snowfall_sum: time.map((_, i) => (i === 3 ? 6 : 0)) } };
   } else if (u.hostname === "api.existenz.ch" && u.pathname.endsWith("/locations")) {
     body = { source: "BAFU", payload: {
-      2170: { id: 1, name: "Genève, Bout du Monde", details: { id: "2170", name: "Genève, Bout du Monde", "water-body-name": "Arve", "water-body-type": "river" } },
+      2170: { id: 1, name: "Genève, Bout du Monde", details: { id: "2170", name: "Genève, Bout du Monde", "water-body-name": "Arve", "water-body-type": "river", lat: 46.19, lon: 6.15 } },
       2053: { id: 2, name: "Martigny, Pont de Rossettan", details: { id: "2053", name: "Martigny, Pont de Rossettan", "water-body-name": "Drance", "water-body-type": "river" } },
       2117: { id: 3, name: "Le Châble, Villette", details: { id: "2117", name: "Le Châble, Villette", "water-body-name": "Drance de Bagnes", "water-body-type": "river" } },
       2208: { id: 4, name: "Genève, Lac Léman", details: { id: "2208", name: "Genève", "water-body-name": "Lac Léman", "water-body-type": "lake" } },
@@ -136,7 +175,7 @@ assert.deepEqual(r.body.result, {});
 r = await rpc({ jsonrpc: "2.0", id: 3, method: "tools/list" });
 const names = r.body.result.tools.map((t) => t.name);
 assert.deepEqual(names, [
-  "chercher_stations", "niveau_actuel", "historique", "debits_journaliers", "dernier_debit_eleve",
+  "chercher_stations", "niveau_actuel", "historique", "debits_journaliers", "dernier_debit_eleve", "prochain_lacher", "prevision",
   "suisse_chercher_stations", "suisse_niveau_actuel", "suisse_historique",
 ]);
 for (const t of r.body.result.tools) {
@@ -302,7 +341,58 @@ assert.match(out.content[0].text, /Source : OFEV/);
 out = await call("dernier_debit_eleve", { station: "2606" }); // température seule
 assert.equal(out.isError, true);
 
-// 5. Erreur Hub'Eau propagée proprement
+// 5. Probabilité de lâcher
+out = await call("prochain_lacher", { station: "V033401001" });
+console.log("\n--- prochain_lacher Dranse ---\n" + out.content[0].text);
+txt = out.content[0].text;
+assert.equal(out.isError, undefined);
+assert.match(txt, /Jours avec lâcher : \d sur les 7 derniers jours, \d+ sur 2\d jours → rythme stable/);
+assert.match(txt, /sam\. 0\/[34] · dim\. 0\/[34]/);
+assert.match(txt, /lun\. [34]\/[34]/);
+assert.match(txt, /Départ le plus souvent entre 1[78]:\d\d–1[78]:\d\d/);
+assert.match(txt, /Même période l'an dernier : 0 jour\(s\) avec lâcher sur \d+/);
+assert.match(txt, /Prévision :\n  - aujourd'hui : /);
+assert.match(txt, /  - demain : /);
+// un samedi ou un dimanche doit sortir peu probable, un jour de semaine probable
+const prev = (await call("prochain_lacher", { station: "V033401001", jours: 7 })).content[0].text;
+assert.match(prev, /(sam\.|dim\.) \d\d\/\d\d : (5|10|15|20) % \((improbable|peu probable)\)/);
+assert.match(prev, /(lun\.|mar\.|mer\.|jeu\.|ven\.) \d\d\/\d\d : (6\d|7\d|8\d|9\d) % \((probable|très probable)\)/);
+
+out = await call("prochain_lacher", { station: "V031401002" });
+assert.match(out.content[0].text, /Pas de lâchers réguliers détectés/);
+
+out = await call("prochain_lacher", { station: "2174", jours: 2 });
+assert.match(out.content[0].text, /Source : OFEV/);
+assert.doesNotMatch(out.content[0].text, /l'an dernier/);
+
+// 6. Prévision
+calls.length = 0;
+out = await call("prevision", { station: "V020542201", jours: 5 });
+console.log("\n--- prevision Arve Bonneville ---\n" + out.content[0].text);
+txt = out.content[0].text;
+assert.equal(out.isError, undefined);
+assert.match(txt, /Fiabilité du modèle sur les (2[5-9]|30) derniers jours : bonne \(corrélation (0,9\d|1,00), le modèle surestime d'un facteur 1,5, corrigé ici\)/);
+assert.match(txt, /  - aujourd'hui : ~\d+(,\d)? m³\/s \(\d+(,\d)?–\d+(,\d)? m³\/s\) · pluie 0 mm/);
+assert.match(txt, /pluie 14 mm/);
+assert.match(txt, /neige 6 cm/);
+assert.match(txt, /GloFAS/);
+assert.ok(calls.some((c) => c.startsWith("https://flood-api.open-meteo.com/v1/flood?latitude=46.077&longitude=6.406&daily=river_discharge,river_discharge_median,river_discharge_p25,river_discharge_p75&past_days=30&forecast_days=6")));
+// Vérifie la mise à l'échelle : prévision d'aujourd'hui ≈ débit naturel simulé (le biais ×1,5 est corrigé)
+const todayKey = new Date(NOW).toISOString().slice(0, 10);
+const expected = arve(noonUTC(todayKey)) / 1000;
+const got = Number(/aujourd'hui : ~([\d,]+)/.exec(txt)[1].replace(",", "."));
+assert.ok(Math.abs(got - expected) / expected < 0.06, `prévision ${got} vs attendu ${expected.toFixed(1)}`);
+
+out = await call("prevision", { station: "V033401001" });
+console.log("\n--- prevision Dranse (régulée) ---\n" + out.content[0].text.split("\n").slice(0, 5).join("\n") + "\n…");
+assert.match(out.content[0].text, /: faible/);
+assert.match(out.content[0].text, /prochain_lacher/);
+
+out = await call("prevision", { station: "2170", jours: 3 });
+assert.match(out.content[0].text, /L'Arve à Genève/);
+assert.match(out.content[0].text, /Source : OFEV/);
+
+// 7. Erreur Hub'Eau propagée proprement
 const realFetch = globalThis.fetch;
 globalThis.fetch = async () => new Response("Service indisponible", { status: 503 });
 out = await call("niveau_actuel", { riviere: "Arve" });

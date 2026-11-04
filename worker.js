@@ -22,7 +22,7 @@
 const HUBEAU = "https://hubeau.eaufrance.fr/api/v2/hydrometrie";
 const EXISTENZ = "https://api.existenz.ch/apiv1/hydro";
 const SOURCE_OFEV = "Source : OFEV (BAFU), hydrodaten.admin.ch, via api.existenz.ch.";
-const SERVER_INFO = { name: "vigicrues-hubeau", title: "Vigicrues (Hub'Eau + OFEV)", version: "1.2.0" };
+const SERVER_INFO = { name: "vigicrues-hubeau", title: "Vigicrues (Hub'Eau + OFEV)", version: "1.3.0" };
 const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const TZ = "Europe/Paris";
 
@@ -180,6 +180,8 @@ const INSTRUCTIONS =
   "hauteur et débit, pas de température de l'eau en temps réel). Suisse : réseau OFEV (outils « suisse_… » : " +
   "débit, hauteur et température de l'eau). Pour une rivière des favoris, appelle directement " +
   "niveau_actuel ou suisse_niveau_actuel avec « riviere » ; sinon, cherche d'abord le code de la station. " +
+  "Les outils dernier_debit_eleve, prochain_lacher et prevision acceptent les deux types de code. " +
+  "Présente les probabilités et prévisions comme des estimations, avec leur fiabilité. " +
   "Les heures renvoyées sont en heure de Paris (identique à l'heure suisse).";
 
 const NOTE_HAUTEUR =
@@ -287,6 +289,43 @@ const TOOLS = [
       required: ["station"],
     },
     run: dernierDebitEleve,
+  },
+  {
+    name: "prochain_lacher",
+    title: "Probabilité de lâcher",
+    description:
+      "Estime la probabilité d'un lâcher de barrage aujourd'hui et les jours suivants, et la fenêtre horaire probable, " +
+      "à partir des habitudes du dernier mois : fréquence par jour de la semaine, rythme des 7 derniers jours, heures de " +
+      "départ, et en France la même période l'an dernier. Les épisodes de plus de 12 h (crues) sont écartés. " +
+      "Estimation statistique : l'exploitant ne publie pas ses lâchers. France (code Hub'Eau) ou Suisse (numéro OFEV).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        station: { type: "string", description: "Code Hub'Eau (ex. « V033401001 ») ou numéro OFEV (ex. « 2174 »)." },
+        jours: { type: "integer", minimum: 1, maximum: 7, description: "Nombre de jours à prévoir, aujourd'hui compris (défaut 3)." },
+        seuil_m3s: { type: "number", description: "Débit (m³/s) à partir duquel on parle de lâcher. Défaut : 1,5 × le débit de base." },
+      },
+      required: ["station"],
+    },
+    run: prochainLacher,
+  },
+  {
+    name: "prevision",
+    title: "Prévision de débit",
+    description:
+      "Prévision indicative du débit moyen journalier jusqu'à 10 jours, avec une fourchette, la pluie et la neige prévues. " +
+      "Utilise la tendance du modèle européen GloFAS appliquée au débit mesuré, et indique à chaque fois la fiabilité du " +
+      "modèle sur cette station (comparaison aux mesures du dernier mois). Utile sur les rivières naturelles de taille " +
+      "moyenne ou grande ; peu fiable sur les petits bassins et ignore les lâchers de barrage. France ou Suisse.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        station: { type: "string", description: "Code Hub'Eau (ex. « V020542201 ») ou numéro OFEV (ex. « 2170 »)." },
+        jours: { type: "integer", minimum: 1, maximum: 10, description: "Horizon en jours (défaut 7)." },
+      },
+      required: ["station"],
+    },
+    run: prevision,
   },
   {
     name: "suisse_chercher_stations",
@@ -618,28 +657,31 @@ async function debitsJournaliers(args) {
 }
 
 // --- dernier_debit_eleve ----------------------------------------------------
-async function dernierDebitEleve(args) {
-  const raw = String(args.station || "").trim().toUpperCase();
+/**
+ * Série de débit du dernier mois pour une station française (code Hub'Eau, pas de 15 min, 29 jours)
+ * ou suisse (numéro OFEV, pas de 10 min, 31 jours). Valeurs en l/s.
+ */
+async function loadFlow(station, now = Date.now()) {
+  const raw = String(station || "").trim().toUpperCase();
   const suisse = /^[A-Z0-9]{4}$/.test(raw);
   const id = suisse ? checkSwissId(raw) : checkCode(raw);
-  const seuilFixe = Number(args.seuil_m3s) > 0 ? Number(args.seuil_m3s) * 1000 : null; // l/s
-  const facteur = Number(args.facteur) >= 1.05 ? Math.min(Number(args.facteur), 20) : 1.5;
-  const now = Date.now();
-
   let s;
   let nom;
   let jours;
+  let coords = null;
   if (suisse) {
     jours = 31;
     const [data, locations] = await Promise.all([
       existenz("/daterange", { locations: id, parameters: "flow", startdate: "-31 days", enddate: "now" }),
-      SUISSE_FAVORIS.some((f) => f.id === id) ? {} : suisseLocations().catch(() => ({})),
+      suisseLocations().catch(() => ({})),
     ]);
     s = swissSeries(data.payload || []).get(`${id}|Q`) || [];
     nom = SUISSE_FAVORIS.find((f) => f.id === id)?.nom || locations[id]?.name || "Station";
+    const d = locations[id]?.details;
+    if (d && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon))) coords = { lat: Number(d.lat), lon: Number(d.lon) };
   } else {
     jours = 29;
-    const [obs, names] = await Promise.all([
+    const [obs, info] = await Promise.all([
       hubeau("/observations_tr", {
         code_entite: id,
         grandeur_hydro: "Q",
@@ -647,17 +689,38 @@ async function dernierDebitEleve(args) {
         date_debut_obs: new Date(now - jours * DAY).toISOString().slice(0, 19) + "Z",
         fields: "code_station,grandeur_hydro,date_obs,resultat_obs",
       }),
-      stationNames(isFavori(id) ? [] : [id]),
+      hubeau("/referentiel/stations", {
+        code_station: id,
+        size: 1,
+        fields: "code_station,libelle_station,longitude_station,latitude_station",
+      }).catch(() => ({ data: [] })),
     ]);
     s = groupSeries(obs.data || []).get(`${id}|Q`) || [];
-    nom = FAVORIS.find((f) => f.code === id)?.nom || names[id] || "Station";
+    const st = (info.data || [])[0];
+    nom = FAVORIS.find((f) => f.code === id)?.nom || st?.libelle_station || "Station";
+    if (st && Number.isFinite(st.latitude_station) && Number.isFinite(st.longitude_station)) {
+      coords = { lat: st.latitude_station, lon: st.longitude_station };
+    }
   }
   if (s.length < 20) {
     throw new Error(`Pas assez de mesures de débit pour ${id} sur le dernier mois (la station ne mesure peut-être que la hauteur).`);
   }
+  return { id, suisse, s, nom, jours, coords };
+}
 
+/** Débit de base (médiane du mois) et seuil : facteur × base, ou seuil donné en m³/s. */
+function baseEtSeuil(s, args) {
   const base = median(s.map((p) => p.v));
+  const seuilFixe = Number(args.seuil_m3s) > 0 ? Number(args.seuil_m3s) * 1000 : null; // l/s
+  const facteur = Number(args.facteur) >= 1.05 ? Math.min(Number(args.facteur), 20) : 1.5;
   const seuil = seuilFixe ?? Math.max(base * facteur, base + 300); // +0,3 m³/s minimum contre le bruit
+  return { base, seuil, seuilFixe };
+}
+
+async function dernierDebitEleve(args) {
+  const now = Date.now();
+  const { id, suisse, s, nom, jours } = await loadFlow(args.station, now);
+  const { base, seuil, seuilFixe } = baseEtSeuil(s, args);
   const step = median(s.slice(1).map((p, i) => p.t - s[i].t)) || 15 * MIN;
   const episodes = findEpisodes(s, seuil, Math.max(3 * step, 45 * MIN), step);
   const last = s[s.length - 1];
@@ -779,6 +842,298 @@ function fmtDuration(ms) {
   return h ? (m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`) : `${m} min`;
 }
 const fmtDayTime = (t) => `${fmtDay(t)} ${fmtTime(t)}`;
+
+// --- prochain_lacher --------------------------------------------------------
+const DUREE_MAX_LACHER = 12 * 3600 * 1000; // 12 h : au-delà, c'est plutôt une crue qu'un lâcher
+
+async function prochainLacher(args) {
+  const now = Date.now();
+  const { id, suisse, s, nom, jours } = await loadFlow(args.station, now);
+  const { base, seuil } = baseEtSeuil(s, args);
+  const horizon = Math.min(7, Math.max(1, Math.round(Number(args.jours) || 3)));
+  const step = median(s.slice(1).map((p, i) => p.t - s[i].t)) || 15 * MIN;
+  const all = findEpisodes(s, seuil, Math.max(3 * step, 45 * MIN), step);
+  const crues = all.filter((e) => e.duration > DUREE_MAX_LACHER);
+  const lachers = all.filter((e) => e.duration <= DUREE_MAX_LACHER);
+
+  const head = [
+    `${nom} (${id}) — probabilité de lâcher, d'après le dernier mois (heure de Paris)`,
+    "",
+    `Débit de base : ${fmtQ(base)} · un lâcher = passage au-dessus de ${fmtQ(seuil)} pendant moins de 12 h.`,
+  ];
+  if (crues.length) head.push(`${crues.length} épisode(s) plus long(s), plutôt des crues, ont été écartés.`);
+
+  if (lachers.length < 3) {
+    head.push("", `Pas de lâchers réguliers détectés sur les ${jours} derniers jours (${lachers.length} épisode(s)) : rien à extrapoler.`);
+    if (suisse) head.push("", SOURCE_OFEV);
+    return head.join("\n");
+  }
+
+  // Jours complets observés (on exclut le premier jour, partiel, et aujourd'hui)
+  const today = dayKey(now);
+  const firstDay = shiftDay(dayKey(s[0].t), 1);
+  const days = [];
+  for (let d = firstDay; d < today; d = shiftDay(d, 1)) days.push(d);
+  const lacherDays = new Set(lachers.map((e) => dayKey(e.start)));
+  const wd = (key) => weekdayFmt.format(Date.parse(`${key}T12:00:00Z`));
+
+  const byWeekday = new Map(WEEKDAYS.map((w) => [w, { k: 0, n: 0 }]));
+  for (const d of days) {
+    const c = byWeekday.get(wd(d));
+    if (!c) continue;
+    c.n++;
+    if (lacherDays.has(d)) c.k++;
+  }
+  const last7 = days.slice(-7);
+  const k7 = last7.filter((d) => lacherDays.has(d)).length;
+  const kAll = days.filter((d) => lacherDays.has(d)).length;
+  const rate7 = k7 / Math.max(1, last7.length);
+  const rateAll = kAll / Math.max(1, days.length);
+
+  // Même période l'an dernier (France) : jours avec un pic au-dessus du seuil mais une moyenne en dessous
+  let lastYear = null;
+  if (!suisse) lastYear = await sameWindowLastYear(id, seuil, today, horizon).catch(() => null);
+
+  // Heures de départ (minutes depuis minuit, heure de Paris)
+  const starts = lachers.map((e) => minutesOfDay(e.start)).sort((a, b) => a - b);
+  const q = (p) => starts[Math.min(starts.length - 1, Math.floor(p * (starts.length - 1) + 0.5))];
+  const fenetre = `${fmtHM(q(0.25))}–${fmtHM(q(0.75))}`;
+  const latestUsual = q(0.9);
+
+  const peaks7 = lachers.filter((e) => e.start >= now - 7 * DAY).map((e) => e.peak.v);
+  const peaksAll = lachers.map((e) => e.peak.v);
+
+  const lines = [...head, ""];
+  lines.push(
+    `Jours avec lâcher : ${k7} sur les ${last7.length} derniers jours, ${kAll} sur ${days.length} jours ` +
+      `→ ${trendWord(rate7, rateAll)}.`,
+  );
+  lines.push(`Par jour de la semaine : ${WEEKDAYS.map((w) => `${w} ${byWeekday.get(w).k}/${byWeekday.get(w).n}`).join(" · ")}`);
+  lines.push(
+    `Départ le plus souvent entre ${fenetre} · durée médiane ${fmtDuration(median(lachers.map((e) => e.duration)))} · ` +
+      `pic médian ${fmtQ(median(peaksAll))}` + (peaks7.length ? ` (${fmtQ(median(peaks7))} sur 7 jours)` : ""),
+  );
+  if (lastYear) {
+    lines.push(`Même période l'an dernier : ${lastYear.k} jour(s) avec lâcher sur ${lastYear.n}.`);
+  }
+
+  lines.push("", "Prévision :");
+  const todayEpisode = lachers.filter((e) => dayKey(e.start) === today).pop();
+  for (let i = 0; i < horizon; i++) {
+    const d = shiftDay(today, i);
+    const w = wd(d);
+    // Fréquence de ce jour de la semaine sur le mois (lissée), ajustée selon le rythme des 7 derniers jours.
+    // L'an dernier n'est donné qu'à titre de contexte : les régimes d'exploitation changent d'une année à l'autre.
+    const c = byWeekday.get(w) || { k: 0, n: 0 };
+    let p = (c.k + 1) / (c.n + 2);
+    const trendF = rateAll > 0 ? rate7 / rateAll : 1;
+    if (trendF >= 1.3) p += (1 - p) * 0.3;
+    else if (trendF <= 0.7) p *= 0.7;
+    const label = i === 0 ? "aujourd'hui" : i === 1 ? "demain" : `${w} ${frDate(d).slice(0, 5)}`;
+
+    if (i === 0 && todayEpisode) {
+      const enCours = todayEpisode.end === s[s.length - 1].t;
+      lines.push(
+        `  - ${label} : ${enCours ? "lâcher en cours depuis" : "lâcher déjà passé à"} ${fmtTime(todayEpisode.start)}` +
+          `${enCours ? "" : `–${fmtTime(todayEpisode.end)}`}, pic ${fmtQ(todayEpisode.peak.v)}`,
+      );
+      continue;
+    }
+    if (i === 0 && minutesOfDay(now) > latestUsual + 60) {
+      p *= 0.25; // l'heure habituelle est passée
+      lines.push(`  - ${label} : ${pct(p)} (${pWord(p)}), l'heure habituelle (jusqu'à ${fmtHM(latestUsual)}) est passée`);
+      continue;
+    }
+    lines.push(`  - ${label} : ${pct(p)} (${pWord(p)}), plutôt entre ${fenetre}`);
+  }
+
+  lines.push(
+    "",
+    "Estimation statistique à partir des habitudes récentes, pas une information de l'exploitant : " +
+      "jours fériés, froid (demande d'électricité) ou pluie peuvent tout changer.",
+  );
+  if (suisse) lines.push(SOURCE_OFEV);
+  return lines.join("\n");
+}
+
+async function sameWindowLastYear(code, seuil, today, horizon) {
+  const center = shiftDay(today, -365);
+  const debut = shiftDay(center, -10);
+  const fin = shiftDay(center, horizon + 10);
+  const get = (g) =>
+    hubeau("/obs_elab", {
+      code_entite: code,
+      grandeur_hydro_elab: g,
+      date_debut_obs_elab: debut,
+      date_fin_obs_elab: fin,
+      size: 100,
+      fields: "date_obs_elab,resultat_obs_elab",
+    });
+  const [mx, moy] = await Promise.all([get("QIXnJ"), get("QmnJ")]);
+  const mean = new Map((moy.data || []).map((r) => [r.date_obs_elab.slice(0, 10), r.resultat_obs_elab]));
+  const rows = (mx.data || []).filter((r) => mean.has(r.date_obs_elab.slice(0, 10)));
+  if (rows.length < 10) return null;
+  const k = rows.filter((r) => r.resultat_obs_elab > seuil && mean.get(r.date_obs_elab.slice(0, 10)) < seuil).length;
+  return { k, n: rows.length };
+}
+
+function minutesOfDay(t) {
+  const parts = Object.fromEntries(hmFmt.formatToParts(t).map((x) => [x.type, x.value]));
+  return Number(parts.hour) * 60 + Number(parts.minute);
+}
+const fmtHM = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(Math.round(m % 60)).padStart(2, "0")}`;
+const pct = (p) => `${Math.round((p * 100) / 5) * 5} %`;
+function pWord(p) {
+  if (p >= 0.8) return "très probable";
+  if (p >= 0.6) return "probable";
+  if (p >= 0.4) return "incertain";
+  if (p >= 0.2) return "peu probable";
+  return "improbable";
+}
+function trendWord(recent, overall) {
+  if (overall === 0) return "aucun lâcher";
+  const r = recent / overall;
+  if (r >= 1.3) return "plus fréquents ces derniers jours";
+  if (r <= 0.7) return "moins fréquents ces derniers jours";
+  return "rythme stable";
+}
+
+// --- prevision --------------------------------------------------------------
+const FLOOD_API = "https://flood-api.open-meteo.com/v1/flood";
+const METEO_API = "https://api.open-meteo.com/v1/forecast";
+
+async function prevision(args) {
+  const now = Date.now();
+  const horizon = Math.min(10, Math.max(1, Math.round(Number(args.jours) || 7)));
+  const { id, suisse, s, nom, coords } = await loadFlow(args.station, now);
+  if (!coords) throw new Error(`Coordonnées introuvables pour la station ${id}.`);
+
+  const [flood, meteo] = await Promise.all([
+    openMeteo(FLOOD_API, {
+      latitude: coords.lat,
+      longitude: coords.lon,
+      daily: "river_discharge,river_discharge_median,river_discharge_p25,river_discharge_p75",
+      past_days: 30,
+      forecast_days: horizon + 1,
+    }),
+    openMeteo(METEO_API, {
+      latitude: coords.lat,
+      longitude: coords.lon,
+      daily: "precipitation_sum,snowfall_sum",
+      timezone: TZ,
+      forecast_days: Math.min(16, horizon + 1),
+    }).catch(() => null),
+  ]);
+
+  // Débits moyens journaliers mesurés (l/s → m³/s)
+  const obsDaily = new Map();
+  for (const p of s) {
+    const k = dayKey(p.t);
+    const d = obsDaily.get(k) || { sum: 0, n: 0 };
+    d.sum += p.v / 1000;
+    d.n++;
+    obsDaily.set(k, d);
+  }
+  const today = dayKey(now);
+  const obsMean = new Map([...obsDaily.entries()].filter(([k, d]) => k < today && d.n >= 12).map(([k, d]) => [k, d.sum / d.n]));
+
+  const fd = flood.daily || {};
+  const times = fd.time || [];
+  const model = new Map(times.map((t, i) => [t, fd.river_discharge?.[i]]));
+
+  // Contrôle de fiabilité : modèle vs mesures sur les jours passés communs
+  const pairs = times.filter((t) => t < today && obsMean.has(t) && model.get(t) > 0).map((t) => [obsMean.get(t), model.get(t)]);
+  if (pairs.length < 10) throw new Error("Pas assez de jours communs entre les mesures et le modèle pour évaluer la prévision.");
+  const r = pearson(pairs.map((p) => Math.log(p[0])), pairs.map((p) => Math.log(p[1])));
+  const biais = median(pairs.map(([o, m]) => o / m));
+
+  // Ancrage : dernier jour complet avec mesure et modèle
+  const anchorDay = times.filter((t) => t < today && obsMean.has(t) && model.get(t) > 0).pop();
+  const anchorObs = obsMean.get(anchorDay);
+  const anchorModel = model.get(anchorDay);
+
+  const rain = new Map();
+  if (meteo?.daily?.time) {
+    meteo.daily.time.forEach((t, i) => rain.set(t, { p: meteo.daily.precipitation_sum?.[i], n: meteo.daily.snowfall_sum?.[i] }));
+  }
+
+  const fiab = r >= 0.8 ? "bonne" : r >= 0.5 ? "moyenne" : "faible";
+  const lines = [
+    `${nom} (${id}) — prévision indicative du débit moyen journalier sur ${horizon} jours`,
+    "",
+    `Débit moyen mesuré le ${frDate(anchorDay).slice(0, 5)} : ${fmtM3(anchorObs)}`,
+    `Fiabilité du modèle sur les ${pairs.length} derniers jours : ${fiab} (corrélation ${fmtNum(r, 2)}` +
+      (Math.abs(Math.log(biais)) > Math.log(1.25)
+        ? `, le modèle ${biais < 1 ? "surestime" : "sous-estime"} d'un facteur ${fmtNum(biais < 1 ? 1 / biais : biais, 1)}, corrigé ici)`
+        : ")"),
+  ];
+  if (fiab === "faible") {
+    lines.push(
+      "⚠ Le modèle suit mal cette station (rivière régulée, petit bassin ou maille posée sur une autre rivière) : " +
+        "ne te fie pas aux chiffres ci-dessous. Pour les barrages, utilise prochain_lacher.",
+    );
+  }
+  lines.push("");
+
+  for (let i = 0; i <= horizon; i++) {
+    const d = shiftDay(today, i);
+    const idx = times.indexOf(d);
+    if (idx < 0) continue;
+    const ratio = (v) => (v != null && anchorModel > 0 ? (anchorObs * v) / anchorModel : null);
+    const mid = ratio(fd.river_discharge_median?.[idx] ?? fd.river_discharge?.[idx]);
+    const lo = ratio(fd.river_discharge_p25?.[idx]);
+    const hi = ratio(fd.river_discharge_p75?.[idx]);
+    if (mid == null) continue;
+    const label = i === 0 ? "aujourd'hui" : i === 1 ? "demain" : `${weekdayFmt.format(Date.parse(`${d}T12:00:00Z`))} ${frDate(d).slice(0, 5)}`;
+    const range = lo != null && hi != null ? ` (${fmtM3(Math.min(lo, hi), false)}–${fmtM3(Math.max(lo, hi))})` : "";
+    const w = rain.get(d);
+    const meteoTxt = w ? ` · pluie ${fmtNum(w.p ?? 0, 0)} mm${w.n > 0.5 ? `, neige ${fmtNum(w.n, 0)} cm` : ""}` : "";
+    lines.push(`  - ${label} : ~${fmtM3(mid)}${range}${meteoTxt}`);
+  }
+
+  lines.push(
+    "",
+    "Méthode : tendance du modèle européen GloFAS (maille de 5 km) appliquée au débit mesuré. Ce sont des " +
+      "moyennes journalières : les pointes de la journée peuvent être plus fortes, et le modèle ignore les lâchers de barrage. " +
+      "Pluie et neige prévues au point de la station.",
+    "Sources : GloFAS (Copernicus) et prévisions météo via Open-Meteo (CC BY 4.0)" + (suisse ? " ; " + SOURCE_OFEV : "."),
+  );
+  return lines.join("\n");
+}
+
+async function openMeteo(base, params) {
+  const query = Object.entries(params)
+    .map(([k, v]) => `${k}=${String(v).split(",").map(encodeURIComponent).join(",")}`)
+    .join("&");
+  const res = await fetch(`${base}?${query}`, {
+    headers: { Accept: "application/json", "User-Agent": "vigicrues-mcp (Cloudflare Worker)" },
+    signal: AbortSignal.timeout(20000),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body || body.error) {
+    throw new Error(`Open-Meteo a répondu ${res.status}${body?.reason ? ` : ${body.reason}` : ""}`);
+  }
+  return body;
+}
+
+function pearson(x, y) {
+  const n = x.length;
+  const mx = x.reduce((a, b) => a + b, 0) / n;
+  const my = y.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (x[i] - mx) * (y[i] - my);
+    sxx += (x[i] - mx) ** 2;
+    syy += (y[i] - my) ** 2;
+  }
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+}
+function fmtM3(v, unit = true) {
+  const d = v < 10 ? 1 : 0;
+  return `${fmtNum(v, d)}${unit ? " m³/s" : ""}`;
+}
 
 // --- suisse_chercher_stations ----------------------------------------------
 async function suisseChercherStations(args) {
@@ -1047,6 +1402,7 @@ const dateTimeFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, day: "2-dig
 const dayFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit" });
 const keyFmt = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
 const hourFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, hour: "numeric", hourCycle: "h23" });
+const hmFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const weekdayFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, weekday: "short" });
 const WEEKDAYS = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."];
 
