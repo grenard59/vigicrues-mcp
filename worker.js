@@ -808,18 +808,17 @@ function meanAround(s, center, halfWindow, mode = "both") {
 }
 
 function fmtDelta(g, now, past) {
-  const sign = (x) => (x >= 0 ? "+" : "−");
+  // Arrondi d'abord, signe ensuite : évite les « −0 % ».
+  const signed = (x, digits) => {
+    const r = Number(x.toFixed(digits));
+    return `${r > 0 ? "+" : r < 0 ? "−" : "±"}${fmtNum(Math.abs(r), digits)}`;
+  };
   if (g === "Q") {
     if (past <= 0) return "n.d.";
-    const pct = ((now - past) / past) * 100;
-    return `${sign(pct)}${Math.abs(pct).toFixed(0)} %`;
+    return `${signed(((now - past) / past) * 100, 0)} %`;
   }
-  if (g === "T") {
-    const d = now - past;
-    return `${sign(d)}${fmtNum(Math.abs(d), 1)} °C`;
-  }
-  const cm = (now - past) / 10;
-  return `${sign(cm)}${Math.abs(cm).toFixed(0)} cm`;
+  if (g === "T") return `${signed(now - past, 1)} °C`;
+  return `${signed((now - past) / 10, 0)} cm`;
 }
 
 function trend(g, now, past) {
