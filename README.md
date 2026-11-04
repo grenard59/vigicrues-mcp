@@ -17,8 +17,10 @@ Point d'accès du connecteur : `https://vigicrues.gui-renard.workers.dev/mcp`.
 | `historique` | Jusqu'à 29 jours, pas horaire (France) |
 | `debits_journaliers` | Débit moyen, débit max ou hauteur max par jour, sur n'importe quelle période passée (France) |
 | `dernier_debit_eleve` | Dernier passage au-dessus du débit de base (lâchers de barrage), épisodes récents, heures et jours habituels (France et Suisse) |
-| `prochain_lacher` | Probabilité de lâcher aujourd'hui et les jours suivants, fenêtre horaire probable (France et Suisse) |
-| `prevision` | Débit moyen journalier prévu jusqu'à 10 jours (tendance GloFAS appliquée au débit mesuré), pluie et neige, fiabilité du modèle sur la station (France et Suisse) |
+| `prochain_lacher` | Probabilité de lâcher aujourd'hui et les jours suivants, fenêtre horaire probable, pluie prévue sur le bassin (France et Suisse) |
+| `prevision` | Débit moyen journalier prévu jusqu'à 10 jours (tendance GloFAS appliquée au débit mesuré), fiabilité du modèle sur la station, pluie prévue sur le bassin (France et Suisse) |
+
+La pluie est moyennée sur plusieurs points du bassin versant (coordonnées des stations de la vallée, tableau `BASSINS`), avec la neige et l'isotherme 0 °C. Chaque pluie prévue est comparée à la pluie la plus proche du dernier mois et à la réaction mesurée de la rivière (pic, et débit plancher le lendemain).
 | `suisse_chercher_stations` | Stations OFEV : favoris, ou recherche par rivière ou lieu |
 | `suisse_niveau_actuel` | Débit, hauteur et température de l'eau actuels (Suisse), évolution et tendance |
 | `suisse_historique` | Jusqu'à 31 jours (Suisse) |

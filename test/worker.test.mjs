@@ -107,10 +107,24 @@ globalThis.fetch = async (url) => {
       },
     };
   } else if (u.hostname === "api.open-meteo.com") {
+    // Météo simulée, plusieurs points : pluies passées (il y a 10 j : 30 mm, il y a 20 j : 12 mm),
+    // prévues (J+2 : 22 mm ; J+3 : 6 cm de neige)
     assert.equal(p.get("timezone"), "Europe/Paris");
+    const lats = p.get("latitude").split(",");
+    assert.equal(lats.length, p.get("longitude").split(",").length);
+    const past = Number(p.get("past_days") || 0);
     const n = Number(p.get("forecast_days"));
-    const time = dayList(new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Paris" }).format(NOW), n);
-    body = { daily: { time, precipitation_sum: time.map((_, i) => (i === 2 ? 14.2 : i)), snowfall_sum: time.map((_, i) => (i === 3 ? 6 : 0)) } };
+    const todayParis = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Paris" }).format(NOW);
+    const start = new Date(Date.parse(todayParis) - past * 86400e3).toISOString().slice(0, 10);
+    const time = dayList(start, past + n);
+    const rel = (d) => Math.round((Date.parse(d) - Date.parse(todayParis)) / 86400e3);
+    const rainOf = (d) => ({ [-10]: 30, [-20]: 12, 2: 22, 3: 2 })[rel(d)] ?? 0;
+    const hourly = time.flatMap((d) => Array.from({ length: 24 }, (_, h) => `${d}T${String(h).padStart(2, "0")}:00`));
+    const one = () => ({
+      daily: { time, rain_sum: time.map(rainOf), precipitation_sum: time.map(rainOf), snowfall_sum: time.map((d) => (rel(d) === 3 ? 6 : 0)) },
+      hourly: { time: hourly, freezing_level_height: hourly.map((t) => (rel(t.slice(0, 10)) === 3 ? 1450 : 2350)) },
+    });
+    body = lats.length > 1 ? lats.map(one) : one();
   } else if (u.hostname === "api.existenz.ch" && u.pathname.endsWith("/locations")) {
     body = { source: "BAFU", payload: {
       2170: { id: 1, name: "Genève, Bout du Monde", details: { id: "2170", name: "Genève, Bout du Monde", "water-body-name": "Arve", "water-body-type": "river", lat: 46.19, lon: 6.15 } },
@@ -360,6 +374,8 @@ assert.match(prev, /(lun\.|mar\.|mer\.|jeu\.|ven\.) \d\d\/\d\d : (6\d|7\d|8\d|9\
 
 out = await call("prochain_lacher", { station: "V031401002" });
 assert.match(out.content[0].text, /Pas de lâchers réguliers détectés/);
+assert.match(out.content[0].text, /Pluie sur le bassin de la Dranse \(7 points\)/); // la pluie reste utile sans lâchers
+assert.match(prev, /Pluie sur le bassin de la Dranse/);
 
 out = await call("prochain_lacher", { station: "2174", jours: 2 });
 assert.match(out.content[0].text, /Source : OFEV/);
@@ -372,9 +388,11 @@ console.log("\n--- prevision Arve Bonneville ---\n" + out.content[0].text);
 txt = out.content[0].text;
 assert.equal(out.isError, undefined);
 assert.match(txt, /Fiabilité du modèle sur les (2[5-9]|30) derniers jours : bonne \(corrélation (0,9\d|1,00), le modèle surestime d'un facteur 1,5, corrigé ici\)/);
-assert.match(txt, /  - aujourd'hui : ~\d+(,\d)? m³\/s \(\d+(,\d)?–\d+(,\d)? m³\/s\) · pluie 0 mm/);
-assert.match(txt, /pluie 14 mm/);
-assert.match(txt, /neige 6 cm/);
+assert.match(txt, /  - aujourd'hui : ~\d+(,\d)? m³\/s \(\d+(,\d)?–\d+(,\d)? m³\/s\)\n/);
+assert.match(txt, /Pluie sur le bassin de l'Arve \(8 points\) :/);
+assert.match(txt, /22 mm de pluie \(isotherme 0 °C vers 2[\s ]?400 m\) → (hausse nette probable|petite hausse possible) · repère : le \d\d\/\d\d, 30 mm → pic [\d,]+ m³\/s, plancher [\d,]+ m³\/s le lendemain/);
+assert.match(txt, /2 mm de pluie, 6 cm de neige \(isotherme 0 °C vers 1[\s ]?500 m\) → surtout de la neige/);
+assert.match(txt, /Pluie des 3 derniers jours : 0 mm\./);
 assert.match(txt, /GloFAS/);
 assert.ok(calls.some((c) => c.startsWith("https://flood-api.open-meteo.com/v1/flood?latitude=46.077&longitude=6.406&daily=river_discharge,river_discharge_median,river_discharge_p25,river_discharge_p75&past_days=30&forecast_days=6")));
 // Vérifie la mise à l'échelle : prévision d'aujourd'hui ≈ débit naturel simulé (le biais ×1,5 est corrigé)
@@ -390,6 +408,7 @@ assert.match(out.content[0].text, /prochain_lacher/);
 
 out = await call("prevision", { station: "2170", jours: 3 });
 assert.match(out.content[0].text, /L'Arve à Genève/);
+assert.match(out.content[0].text, /Pluie sur le bassin de l'Arve \(9 points\)/); // 8 points français + la station suisse
 assert.match(out.content[0].text, /Source : OFEV/);
 
 // 7. Erreur Hub'Eau propagée proprement

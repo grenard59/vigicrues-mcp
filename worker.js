@@ -22,7 +22,7 @@
 const HUBEAU = "https://hubeau.eaufrance.fr/api/v2/hydrometrie";
 const EXISTENZ = "https://api.existenz.ch/apiv1/hydro";
 const SOURCE_OFEV = "Source : OFEV (BAFU), hydrodaten.admin.ch, via api.existenz.ch.";
-const SERVER_INFO = { name: "vigicrues-hubeau", title: "Vigicrues (Hub'Eau + OFEV)", version: "1.3.0" };
+const SERVER_INFO = { name: "vigicrues-hubeau", title: "Vigicrues (Hub'Eau + OFEV)", version: "1.4.0" };
 const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const TZ = "Europe/Paris";
 
@@ -68,6 +68,26 @@ const SUISSE_FAVORIS = [
   { riviere: "Inn", id: "2265", nom: "L'Inn à Tarasp" },
   { riviere: "Verzasca", id: "2605", nom: "La Verzasca à Lavertezzo, Campiöi" },
 ];
+
+// Points représentatifs de chaque bassin versant : stations Hub'Eau réparties dans la vallée
+// et ses affluents (on n'utilise que leurs coordonnées). Clé : nom de rivière normalisé.
+const BASSINS = {
+  dranse: ["V031661301", "V031661401", "V031401002", "V032501001", "V032501301", "V032501501", "V033401001"],
+  arve: ["V000201001", "V002000201", "V003201001", "V005651101", "V012000202", "V020542001", "V020542201", "V022000202"],
+  giffre: ["V012000202", "V014000202", "V015401001", "V015501002"],
+  fier: ["V120000301", "V121401001", "V122501001"],
+  cheran: ["V125501001", "V125781001"],
+  isere: ["W000000101", "W004000201", "W022000101", "W024401101", "W011001001", "W043000101"],
+  durance: ["X001001002", "X001501002", "X013001001"],
+  guil: ["X023000202"],
+  ubaye: ["X041541001", "X043401001", "X045401001"],
+};
+// Stations suisses : bassins français (Arve) et/ou stations OFEV du bassin
+const BASSINS_CH = {
+  2170: { fr: BASSINS.arve, ch: ["2170"], nom: "Arve" },
+  2053: { ch: ["2117", "2053"], nom: "Drance" },
+  2117: { ch: ["2117"], nom: "Drance de Bagnes" },
+};
 
 // ---------------------------------------------------------------------------
 // Point d'entrée du Worker
@@ -848,13 +868,15 @@ const DUREE_MAX_LACHER = 12 * 3600 * 1000; // 12 h : au-delà, c'est plutôt une
 
 async function prochainLacher(args) {
   const now = Date.now();
-  const { id, suisse, s, nom, jours } = await loadFlow(args.station, now);
+  const flow = await loadFlow(args.station, now);
+  const { id, suisse, s, nom, jours } = flow;
   const { base, seuil } = baseEtSeuil(s, args);
   const horizon = Math.min(7, Math.max(1, Math.round(Number(args.jours) || 3)));
   const step = median(s.slice(1).map((p, i) => p.t - s[i].t)) || 15 * MIN;
   const all = findEpisodes(s, seuil, Math.max(3 * step, 45 * MIN), step);
   const crues = all.filter((e) => e.duration > DUREE_MAX_LACHER);
   const lachers = all.filter((e) => e.duration <= DUREE_MAX_LACHER);
+  const pluiePromise = pluieBassin(flow, horizon, now).catch(() => null);
 
   const head = [
     `${nom} (${id}) — probabilité de lâcher, d'après le dernier mois (heure de Paris)`,
@@ -865,6 +887,8 @@ async function prochainLacher(args) {
 
   if (lachers.length < 3) {
     head.push("", `Pas de lâchers réguliers détectés sur les ${jours} derniers jours (${lachers.length} épisode(s)) : rien à extrapoler.`);
+    const pluie = await pluiePromise;
+    if (pluie) head.push("", ...pluie);
     if (suisse) head.push("", SOURCE_OFEV);
     return head.join("\n");
   }
@@ -947,10 +971,14 @@ async function prochainLacher(args) {
     lines.push(`  - ${label} : ${pct(p)} (${pWord(p)}), plutôt entre ${fenetre}`);
   }
 
+  const pluie = await pluiePromise;
+  if (pluie) lines.push("", ...pluie);
+
   lines.push(
     "",
     "Estimation statistique à partir des habitudes récentes, pas une information de l'exploitant : " +
-      "jours fériés, froid (demande d'électricité) ou pluie peuvent tout changer.",
+      "jours fériés ou froid (demande d'électricité) peuvent tout changer. Une forte pluie peut aussi donner de l'eau " +
+      "naturellement, avec ou sans lâcher.",
   );
   if (suisse) lines.push(SOURCE_OFEV);
   return lines.join("\n");
@@ -1005,10 +1033,11 @@ const METEO_API = "https://api.open-meteo.com/v1/forecast";
 async function prevision(args) {
   const now = Date.now();
   const horizon = Math.min(10, Math.max(1, Math.round(Number(args.jours) || 7)));
-  const { id, suisse, s, nom, coords } = await loadFlow(args.station, now);
+  const flow = await loadFlow(args.station, now);
+  const { id, suisse, s, nom, coords } = flow;
   if (!coords) throw new Error(`Coordonnées introuvables pour la station ${id}.`);
 
-  const [flood, meteo] = await Promise.all([
+  const [flood, pluie] = await Promise.all([
     openMeteo(FLOOD_API, {
       latitude: coords.lat,
       longitude: coords.lon,
@@ -1016,13 +1045,7 @@ async function prevision(args) {
       past_days: 30,
       forecast_days: horizon + 1,
     }),
-    openMeteo(METEO_API, {
-      latitude: coords.lat,
-      longitude: coords.lon,
-      daily: "precipitation_sum,snowfall_sum",
-      timezone: TZ,
-      forecast_days: Math.min(16, horizon + 1),
-    }).catch(() => null),
+    pluieBassin(flow, horizon, now).catch(() => null),
   ]);
 
   // Débits moyens journaliers mesurés (l/s → m³/s)
@@ -1051,11 +1074,6 @@ async function prevision(args) {
   const anchorDay = times.filter((t) => t < today && obsMean.has(t) && model.get(t) > 0).pop();
   const anchorObs = obsMean.get(anchorDay);
   const anchorModel = model.get(anchorDay);
-
-  const rain = new Map();
-  if (meteo?.daily?.time) {
-    meteo.daily.time.forEach((t, i) => rain.set(t, { p: meteo.daily.precipitation_sum?.[i], n: meteo.daily.snowfall_sum?.[i] }));
-  }
 
   const fiab = r >= 0.8 ? "bonne" : r >= 0.5 ? "moyenne" : "faible";
   const lines = [
@@ -1086,19 +1104,157 @@ async function prevision(args) {
     if (mid == null) continue;
     const label = i === 0 ? "aujourd'hui" : i === 1 ? "demain" : `${weekdayFmt.format(Date.parse(`${d}T12:00:00Z`))} ${frDate(d).slice(0, 5)}`;
     const range = lo != null && hi != null ? ` (${fmtM3(Math.min(lo, hi), false)}–${fmtM3(Math.max(lo, hi))})` : "";
-    const w = rain.get(d);
-    const meteoTxt = w ? ` · pluie ${fmtNum(w.p ?? 0, 0)} mm${w.n > 0.5 ? `, neige ${fmtNum(w.n, 0)} cm` : ""}` : "";
-    lines.push(`  - ${label} : ~${fmtM3(mid)}${range}${meteoTxt}`);
+    lines.push(`  - ${label} : ~${fmtM3(mid)}${range}`);
   }
 
+  if (pluie) lines.push("", ...pluie);
   lines.push(
     "",
     "Méthode : tendance du modèle européen GloFAS (maille de 5 km) appliquée au débit mesuré. Ce sont des " +
-      "moyennes journalières : les pointes de la journée peuvent être plus fortes, et le modèle ignore les lâchers de barrage. " +
-      "Pluie et neige prévues au point de la station.",
+      "moyennes journalières : les pointes de la journée peuvent être plus fortes, et le modèle ignore les lâchers de barrage.",
     "Sources : GloFAS (Copernicus) et prévisions météo via Open-Meteo (CC BY 4.0)" + (suisse ? " ; " + SOURCE_OFEV : "."),
   );
   return lines.join("\n");
+}
+
+// --- pluie sur le bassin versant -------------------------------------------
+/** Coordonnées des points du bassin d'une station (ou, à défaut, 5 points autour d'elle). */
+async function basinPoints(id, suisse, coords) {
+  let fr = [];
+  let ch = [];
+  let label = null;
+  if (suisse) {
+    const b = BASSINS_CH[id];
+    if (b) ({ fr = [], ch = [], nom: label } = b);
+  } else {
+    const fav = FAVORIS.find((f) => f.code === id);
+    const key = fav && norm(fav.riviere);
+    if (key && BASSINS[key]) {
+      fr = BASSINS[key];
+      label = fav.riviere;
+    }
+  }
+  const points = [];
+  if (fr.length) {
+    const res = await hubeau("/referentiel/stations", {
+      code_station: fr,
+      size: fr.length,
+      fields: "code_station,latitude_station,longitude_station",
+    }).catch(() => ({ data: [] }));
+    for (const st of res.data || []) {
+      if (Number.isFinite(st.latitude_station) && Number.isFinite(st.longitude_station)) points.push({ lat: st.latitude_station, lon: st.longitude_station });
+    }
+  }
+  if (ch.length) {
+    const locs = await suisseLocations().catch(() => ({}));
+    for (const c of ch) {
+      const d = locs[c]?.details;
+      if (d && Number.isFinite(Number(d.lat))) points.push({ lat: Number(d.lat), lon: Number(d.lon) });
+    }
+  }
+  if (points.length >= 2) return { points, label: `bassin ${deLa(label)} (${points.length} points)` };
+  if (!coords) return null;
+  // À défaut de bassin connu : la station et 4 points à ~11 km autour
+  const ring = [[0, 0], [0.1, 0], [-0.1, 0], [0, 0.14], [0, -0.14]].map(([a, b]) => ({ lat: coords.lat + a, lon: coords.lon + b }));
+  return { points: ring, label: "autour de la station (approximation : bassin non répertorié)" };
+}
+
+/**
+ * Pluie et neige prévues sur le bassin, isotherme 0 °C, et repères tirés des pluies du dernier mois :
+ * pour chaque pluie passée notable, comment le débit a réagi (pic, et plancher le lendemain).
+ */
+async function pluieBassin({ id, suisse, coords, s }, horizon, now = Date.now()) {
+  const basin = await basinPoints(id, suisse, coords);
+  if (!basin) return null;
+  const raw = await openMeteo(METEO_API, {
+    latitude: basin.points.map((p) => p.lat.toFixed(4)).join(","),
+    longitude: basin.points.map((p) => p.lon.toFixed(4)).join(","),
+    daily: "precipitation_sum,rain_sum,snowfall_sum",
+    hourly: "freezing_level_height",
+    timezone: TZ,
+    past_days: 30,
+    forecast_days: Math.min(16, horizon + 1),
+  });
+  const results = Array.isArray(raw) ? raw : [raw];
+  const days = results[0]?.daily?.time || [];
+  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / Math.max(1, arr.length);
+  const pick = (r, k, i) => Number(r.daily?.[k]?.[i]) || 0;
+  const rain = new Map(days.map((d, i) => [d, avg(results.map((r) => pick(r, "rain_sum", i) || pick(r, "precipitation_sum", i)))]));
+  const snow = new Map(days.map((d, i) => [d, avg(results.map((r) => pick(r, "snowfall_sum", i)))]));
+
+  // Isotherme 0 °C : maximum journalier de la moyenne des points
+  const iso = new Map();
+  const hTimes = results[0]?.hourly?.time || [];
+  hTimes.forEach((t, i) => {
+    const vals = results.map((r) => r.hourly?.freezing_level_height?.[i]).filter((v) => Number.isFinite(v));
+    if (!vals.length) return;
+    const d = t.slice(0, 10);
+    iso.set(d, Math.max(iso.get(d) ?? -Infinity, avg(vals)));
+  });
+
+  // Réaction du débit aux pluies passées (débit max du jour et du lendemain, plancher du lendemain)
+  const dayMax = new Map();
+  const dayMin = new Map();
+  for (const p of s) {
+    const k = dayKey(p.t);
+    dayMax.set(k, Math.max(dayMax.get(k) ?? -Infinity, p.v));
+    dayMin.set(k, Math.min(dayMin.get(k) ?? Infinity, p.v));
+  }
+  const today = dayKey(now);
+  const events = days
+    .filter((d) => d < today && rain.get(d) >= 8 && dayMax.has(d))
+    .map((d) => {
+      const next = shiftDay(d, 1);
+      return { d, rain: rain.get(d), pic: Math.max(dayMax.get(d), dayMax.get(next) ?? -Infinity), plancher: dayMin.get(next) ?? dayMin.get(d) };
+    });
+  const past3 = [1, 2, 3].map((i) => rain.get(shiftDay(today, -i)) || 0).reduce((a, b) => a + b, 0);
+
+  const lines = [`Pluie sur le ${basin.label} :`];
+  lines.push(`  Pluie des 3 derniers jours : ${fmtNum(past3, 0)} mm${past3 >= 20 ? " (sols humides : la rivière réagira plus vite)" : ""}.`);
+  let notable = 0;
+  for (let i = 0; i <= horizon; i++) {
+    const d = shiftDay(today, i);
+    if (!rain.has(d)) continue;
+    const r = rain.get(d);
+    const n = snow.get(d) || 0;
+    const r48 = r + (rain.get(shiftDay(d, -1)) || 0);
+    if (r < 3 && n < 2) continue;
+    notable++;
+    const label = i === 0 ? "aujourd'hui" : i === 1 ? "demain" : `${weekdayFmt.format(Date.parse(`${d}T12:00:00Z`))} ${frDate(d).slice(0, 5)}`;
+    let txt = `  - ${label} : ${fmtNum(r, 0)} mm de pluie`;
+    if (n >= 2) txt += `, ${fmtNum(n, 0)} cm de neige`;
+    if (iso.has(d)) txt += ` (isotherme 0 °C vers ${fmtNum(Math.round(iso.get(d) / 100) * 100, 0)} m)`;
+    txt += ` → ${rainEffect(r48, r, n)}`;
+    const analog = closestEvent(events, r);
+    if (analog && r >= 5) {
+      txt += ` · repère : le ${frDate(analog.d).slice(0, 5)}, ${fmtNum(analog.rain, 0)} mm → pic ${fmtQ(analog.pic)}, plancher ${fmtQ(analog.plancher)} le lendemain`;
+    }
+    lines.push(txt);
+  }
+  if (notable === 0) lines.push(`  Pas de pluie notable prévue d'ici ${horizon} jour(s).`);
+  if (events.length === 0) lines.push("  Aucune pluie de plus de 8 mm ce dernier mois : pas de repère local pour calibrer.");
+  lines.push("  Pluie moyenne sur les points du bassin (prévisions Open-Meteo) ; la neige ne fond pas tout de suite.");
+  return lines;
+}
+
+function deLa(riviere) {
+  if (/^[aeiouyéèêàâîôûh]/i.test(riviere)) return `de l'${riviere}`;
+  if (["giffre", "fier", "cheran", "guil", "rhone", "doubs", "buech"].includes(norm(riviere))) return `du ${riviere}`;
+  return `de la ${riviere}`;
+}
+
+function rainEffect(r48, r, snowCm) {
+  if (snowCm >= 5 && r < 5) return "surtout de la neige : peu d'effet immédiat";
+  if (r48 < 8) return "peu d'effet attendu";
+  if (r48 < 20) return "petite hausse possible";
+  if (r48 < 40) return "hausse nette probable";
+  return "forte hausse probable, prudence";
+}
+
+function closestEvent(events, r) {
+  let best = null;
+  for (const e of events) if (!best || Math.abs(e.rain - r) < Math.abs(best.rain - r)) best = e;
+  return best;
 }
 
 async function openMeteo(base, params) {
