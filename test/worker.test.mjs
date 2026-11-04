@@ -15,6 +15,11 @@ function obsSeries(code, g, from, to, stepMin, f) {
   return out;
 }
 
+function isLacher(t) {
+  const d = new Date(t);
+  return d.getUTCDay() >= 1 && d.getUTCDay() <= 5 && d.getUTCHours() >= 16 && d.getUTCHours() < 19;
+}
+
 globalThis.fetch = async (url) => {
   const u = new URL(url);
   calls.push(url);
@@ -37,7 +42,13 @@ globalThis.fetch = async (url) => {
     const from = Date.parse(p.get("date_debut_obs"));
     const lastObs = NOW - 20 * 60000;
     let data = [];
-    if (p.get("timestep") === "60") {
+    if (p.get("timestep") === "15") {
+      // Lâchers de barrage simulés : en semaine de 16 h à 19 h UTC, 16 m³/s ; sinon débit de base 3,3 m³/s
+      const c = codes[0];
+      if (c === "V033401001") data = obsSeries(c, "Q", from, lastObs, 15, (t) => (isLacher(t) ? 16000 + (t % 7) * 100 : 3300 + (t % 3) * 10));
+      else if (c === "V031401002") data = obsSeries(c, "Q", from, lastObs, 15, (t) => 1700 + (t % 3) * 5);
+      data.sort(() => Math.random() - 0.5);
+    } else if (p.get("timestep") === "60") {
       const g = p.get("grandeur_hydro");
       data = obsSeries(codes[0], g, from, lastObs, 60, (t) => (g === "Q" ? 15000 + 5000 * Math.sin((t - from) / 86400000 * Math.PI) : 150 + 20 * Math.sin((t - from) / 86400000 * Math.PI)));
       data.sort(() => Math.random() - 0.5); // Hub'Eau renvoie un ordre non chronologique avec timestep
@@ -84,7 +95,8 @@ globalThis.fetch = async (url) => {
         if (loc === "2606" && par !== "temperature") continue; // Genève Halle de l'Île : température seule
         for (let t = end - span; t <= end; t += 600e3) {
           const x = (t - (end - span)) / span; // 0 → 1
-          const val = par === "flow" ? 15 + 4 * x : par === "height" ? 378.5 + 0.3 * x : 8.2 - 0.6 * x;
+          let val = par === "flow" ? 15 + 4 * x : par === "height" ? 378.5 + 0.3 * x : 8.2 - 0.6 * x;
+          if (loc === "2174" && par === "flow") val = isLacher(t) ? 310 : 120; // Rhône à Chancy : éclusées simulées
           payload.push({ timestamp: t / 1000, loc, par, val: Math.round(val * 100) / 100 });
         }
       }
@@ -124,7 +136,7 @@ assert.deepEqual(r.body.result, {});
 r = await rpc({ jsonrpc: "2.0", id: 3, method: "tools/list" });
 const names = r.body.result.tools.map((t) => t.name);
 assert.deepEqual(names, [
-  "chercher_stations", "niveau_actuel", "historique", "debits_journaliers",
+  "chercher_stations", "niveau_actuel", "historique", "debits_journaliers", "dernier_debit_eleve",
   "suisse_chercher_stations", "suisse_niveau_actuel", "suisse_historique",
 ]);
 for (const t of r.body.result.tools) {
@@ -253,7 +265,44 @@ out = await call("suisse_historique", { station: "2170", jours: 31, grandeur: "t
 assert.doesNotMatch(out.content[0].text, /Débit/);
 assert.match(out.content[0].text, /Température de l'eau — actuel/);
 
-// 4. Erreur Hub'Eau propagée proprement
+// 4. Dernier débit élevé (lâchers)
+calls.length = 0;
+out = await call("dernier_debit_eleve", { station: "V033401001" });
+console.log("\n--- dernier_debit_eleve Dranse (lâchers simulés) ---\n" + out.content[0].text);
+let txt = out.content[0].text;
+assert.equal(out.isError, undefined);
+assert.match(txt, /Débit de base : 3,3\d m³\/s/);
+assert.match(txt, /seuil : 4,9\d m³\/s \(1,5 × la base\)/);
+assert.match(txt, /Dernière fois au-dessus du seuil : |au-dessus du seuil depuis/);
+assert.match(txt, /(2[0-2]) épisode\(s\) en 29 jours · durée médiane 3 h/);
+assert.match(txt, /Heures de début les plus fréquentes : 1[78] h/);
+assert.match(txt, /sam\. 0 · dim\. 0/);
+assert.match(calls[0], /timestep=15/);
+
+out = await call("dernier_debit_eleve", { station: "V033401001", seuil_m3s: 20 });
+assert.match(out.content[0].text, /seuil demandé : 20,0 m³\/s/);
+assert.match(out.content[0].text, /Aucun passage au-dessus du seuil/);
+assert.match(out.content[0].text, /dernier jour avec un pic au-dessus du seuil : \d\d\/\d\d\/\d{4} \(maximum 2\d,0 m³\/s\)/);
+
+out = await call("dernier_debit_eleve", { station: "V031401002" });
+console.log("\n--- dernier_debit_eleve débit plat → historique journalier ---\n" + out.content[0].text);
+assert.match(out.content[0].text, /Aucun passage/);
+assert.ok(calls.some((c) => c.includes("grandeur_hydro_elab=QIXnJ")));
+
+out = await call("dernier_debit_eleve", { station: "V003201001" });
+assert.equal(out.isError, true);
+assert.match(out.content[0].text, /que la hauteur/);
+
+out = await call("dernier_debit_eleve", { station: "2174" });
+console.log("\n--- dernier_debit_eleve Rhône Chancy (Suisse) ---\n" + out.content[0].text.split("\n").slice(0, 8).join("\n") + "\n…");
+assert.match(out.content[0].text, /Débit de base : 120 m³\/s/);
+assert.match(out.content[0].text, /31 jours/);
+assert.match(out.content[0].text, /Source : OFEV/);
+
+out = await call("dernier_debit_eleve", { station: "2606" }); // température seule
+assert.equal(out.isError, true);
+
+// 5. Erreur Hub'Eau propagée proprement
 const realFetch = globalThis.fetch;
 globalThis.fetch = async () => new Response("Service indisponible", { status: 503 });
 out = await call("niveau_actuel", { riviere: "Arve" });

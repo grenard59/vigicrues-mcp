@@ -16,6 +16,7 @@ Point d'accès du connecteur : `https://vigicrues.gui-renard.workers.dev/mcp`.
 | `niveau_actuel` | Hauteur et débit actuels (France), évolution sur 1 h / 3 h et tendance |
 | `historique` | Jusqu'à 29 jours, pas horaire (France) |
 | `debits_journaliers` | Débit moyen, débit max ou hauteur max par jour, sur n'importe quelle période passée (France) |
+| `dernier_debit_eleve` | Dernier passage au-dessus du débit de base (lâchers de barrage), épisodes récents, heures et jours habituels (France et Suisse) |
 | `suisse_chercher_stations` | Stations OFEV : favoris, ou recherche par rivière ou lieu |
 | `suisse_niveau_actuel` | Débit, hauteur et température de l'eau actuels (Suisse), évolution et tendance |
 | `suisse_historique` | Jusqu'à 31 jours (Suisse) |

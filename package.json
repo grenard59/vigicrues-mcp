@@ -1,6 +1,6 @@
 {
   "name": "vigicrues-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Serveur MCP (Cloudflare Worker) : hauteurs, débits et températures des rivières françaises (Hub'Eau) et suisses (OFEV)",

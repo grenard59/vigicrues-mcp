@@ -22,7 +22,7 @@
 const HUBEAU = "https://hubeau.eaufrance.fr/api/v2/hydrometrie";
 const EXISTENZ = "https://api.existenz.ch/apiv1/hydro";
 const SOURCE_OFEV = "Source : OFEV (BAFU), hydrodaten.admin.ch, via api.existenz.ch.";
-const SERVER_INFO = { name: "vigicrues-hubeau", title: "Vigicrues (Hub'Eau + OFEV)", version: "1.1.0" };
+const SERVER_INFO = { name: "vigicrues-hubeau", title: "Vigicrues (Hub'Eau + OFEV)", version: "1.2.0" };
 const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const TZ = "Europe/Paris";
 
@@ -267,6 +267,26 @@ const TOOLS = [
       required: ["station"],
     },
     run: debitsJournaliers,
+  },
+  {
+    name: "dernier_debit_eleve",
+    title: "Dernier débit élevé (lâchers)",
+    description:
+      "Dit quand le débit d'une station a été au-dessus de la normale pour la dernière fois, avec la durée et le pic, " +
+      "et liste les épisodes récents. Pensé pour les rivières régulées par barrage (lâchers, éclusées) : la « normale » " +
+      "est le débit de base, c'est-à-dire la médiane des débits du dernier mois. Donne aussi les heures et jours où les " +
+      "lâchers démarrent le plus souvent. Fonctionne en France (code Hub'Eau à 10 caractères, 29 jours de détail puis " +
+      "maximums journaliers sur un an) et en Suisse (numéro OFEV à 4 caractères, 31 jours).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        station: { type: "string", description: "Code Hub'Eau (ex. « V033401001 ») ou numéro OFEV (ex. « 2174 »)." },
+        seuil_m3s: { type: "number", description: "Seuil en m³/s à la place de la normale (ex. ton débit minimum navigable)." },
+        facteur: { type: "number", description: "Seuil = facteur × débit de base (défaut 1,5). Ignoré si seuil_m3s est donné." },
+      },
+      required: ["station"],
+    },
+    run: dernierDebitEleve,
   },
   {
     name: "suisse_chercher_stations",
@@ -597,6 +617,169 @@ async function debitsJournaliers(args) {
   return `${head}\n${summary}\n\n${body}${note}${hNote}`;
 }
 
+// --- dernier_debit_eleve ----------------------------------------------------
+async function dernierDebitEleve(args) {
+  const raw = String(args.station || "").trim().toUpperCase();
+  const suisse = /^[A-Z0-9]{4}$/.test(raw);
+  const id = suisse ? checkSwissId(raw) : checkCode(raw);
+  const seuilFixe = Number(args.seuil_m3s) > 0 ? Number(args.seuil_m3s) * 1000 : null; // l/s
+  const facteur = Number(args.facteur) >= 1.05 ? Math.min(Number(args.facteur), 20) : 1.5;
+  const now = Date.now();
+
+  let s;
+  let nom;
+  let jours;
+  if (suisse) {
+    jours = 31;
+    const [data, locations] = await Promise.all([
+      existenz("/daterange", { locations: id, parameters: "flow", startdate: "-31 days", enddate: "now" }),
+      SUISSE_FAVORIS.some((f) => f.id === id) ? {} : suisseLocations().catch(() => ({})),
+    ]);
+    s = swissSeries(data.payload || []).get(`${id}|Q`) || [];
+    nom = SUISSE_FAVORIS.find((f) => f.id === id)?.nom || locations[id]?.name || "Station";
+  } else {
+    jours = 29;
+    const [obs, names] = await Promise.all([
+      hubeau("/observations_tr", {
+        code_entite: id,
+        grandeur_hydro: "Q",
+        timestep: 15,
+        date_debut_obs: new Date(now - jours * DAY).toISOString().slice(0, 19) + "Z",
+        fields: "code_station,grandeur_hydro,date_obs,resultat_obs",
+      }),
+      stationNames(isFavori(id) ? [] : [id]),
+    ]);
+    s = groupSeries(obs.data || []).get(`${id}|Q`) || [];
+    nom = FAVORIS.find((f) => f.code === id)?.nom || names[id] || "Station";
+  }
+  if (s.length < 20) {
+    throw new Error(`Pas assez de mesures de débit pour ${id} sur le dernier mois (la station ne mesure peut-être que la hauteur).`);
+  }
+
+  const base = median(s.map((p) => p.v));
+  const seuil = seuilFixe ?? Math.max(base * facteur, base + 300); // +0,3 m³/s minimum contre le bruit
+  const step = median(s.slice(1).map((p, i) => p.t - s[i].t)) || 15 * MIN;
+  const episodes = findEpisodes(s, seuil, Math.max(3 * step, 45 * MIN), step);
+  const last = s[s.length - 1];
+
+  const lines = [
+    `${nom} (${id}) — débits des ${jours} derniers jours, heure de Paris`,
+    "",
+    seuilFixe
+      ? `Débit de base : ${fmtQ(base)} (médiane de la période) · seuil demandé : ${fmtQ(seuil)}`
+      : `Débit de base : ${fmtQ(base)} (médiane de la période) · seuil : ${fmtQ(seuil)} (${fmtNum(seuil / base, 1)} × la base)`,
+  ];
+
+  const current = episodes.length && episodes[episodes.length - 1].end === last.t ? episodes[episodes.length - 1] : null;
+  lines.push(
+    current
+      ? `Maintenant : ${fmtQ(last.v)} (${fmtDateTime(last.t)}), au-dessus du seuil depuis ${fmtDayTime(current.start)}.`
+      : `Maintenant : ${fmtQ(last.v)} (${fmtDateTime(last.t)}), sous le seuil.`,
+  );
+  lines.push("");
+
+  if (episodes.length === 0) {
+    lines.push(`Aucun passage au-dessus du seuil sur les ${jours} derniers jours.`);
+    if (!suisse) lines.push(await lastHighDay(id, seuil, now - jours * DAY));
+  } else {
+    const done = current ? episodes.slice(0, -1) : episodes;
+    const ref = done[done.length - 1];
+    if (ref) {
+      lines.push(
+        `Dernière fois au-dessus du seuil : ${fmtDay(ref.start)}, de ${fmtTime(ref.start)} à ${fmtTime(ref.end)} ` +
+          `(${fmtDuration(ref.duration)}), pic ${fmtQ(ref.peak.v)} à ${fmtTime(ref.peak.t)}.`,
+      );
+    }
+    lines.push("");
+    lines.push(
+      `${episodes.length} épisode(s) en ${jours} jours · durée médiane ${fmtDuration(median(episodes.map((e) => e.duration)))} · ` +
+        `pic médian ${fmtQ(median(episodes.map((e) => e.peak.v)))}`,
+    );
+    lines.push("Derniers épisodes :");
+    for (const e of episodes.slice(-6).reverse()) {
+      lines.push(`  - ${fmtDay(e.start)} ${fmtTime(e.start)} → ${fmtTime(e.end)} (${fmtDuration(e.duration)}), pic ${fmtQ(e.peak.v)}`);
+    }
+    if (episodes.length >= 4) {
+      const hours = countBy(episodes, (e) => Number(hourFmt.formatToParts(e.start).find((x) => x.type === "hour").value));
+      const topHours = [...hours.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      lines.push(`Heures de début les plus fréquentes : ${topHours.map(([h, n]) => `${h} h (${n} fois)`).join(", ")}`);
+      const days = countBy(episodes, (e) => weekdayFmt.format(e.start));
+      lines.push(`Par jour de la semaine : ${WEEKDAYS.map((d) => `${d} ${days.get(d) || 0}`).join(" · ")}`);
+      lines.push("Ces régularités ne garantissent pas les prochains lâchers : les horaires dépendent de l'exploitant.");
+    }
+  }
+  if (suisse) lines.push("", SOURCE_OFEV);
+  return lines.join("\n");
+}
+
+/** Épisodes consécutifs au-dessus du seuil ; les trous de mesure courts ne coupent pas un épisode. */
+function findEpisodes(s, seuil, maxGap, step) {
+  const episodes = [];
+  let cur = null;
+  let prev = null;
+  for (const p of s) {
+    if (p.v > seuil) {
+      if (cur && p.t - prev.t <= maxGap) {
+        cur.end = p.t;
+        if (p.v > cur.peak.v) cur.peak = p;
+      } else {
+        if (cur) episodes.push(cur);
+        cur = { start: p.t, end: p.t, peak: p };
+      }
+      prev = p;
+    } else if (cur) {
+      episodes.push(cur);
+      cur = null;
+    }
+  }
+  if (cur) episodes.push(cur);
+  for (const e of episodes) e.duration = e.end - e.start + step;
+  return episodes;
+}
+
+/** Au-delà de la fenêtre détaillée : dernier jour dont le débit maximal a dépassé le seuil (France, un an). */
+async function lastHighDay(code, seuil, before) {
+  const fin = dayKey(before);
+  const debut = shiftDay(fin, -365);
+  try {
+    const res = await hubeau("/obs_elab", {
+      code_entite: code,
+      grandeur_hydro_elab: "QIXnJ",
+      date_debut_obs_elab: debut,
+      date_fin_obs_elab: fin,
+      size: 1000,
+      fields: "date_obs_elab,resultat_obs_elab",
+    });
+    const hits = (res.data || [])
+      .filter((r) => r.resultat_obs_elab > seuil)
+      .sort((a, b) => (a.date_obs_elab < b.date_obs_elab ? -1 : 1));
+    if (hits.length === 0) return `Aucun maximum journalier au-dessus du seuil sur l'année précédente non plus.`;
+    const h = hits[hits.length - 1];
+    return `Avant cela, dernier jour avec un pic au-dessus du seuil : ${frDate(h.date_obs_elab)} (maximum ${fmtQ(h.resultat_obs_elab)}).`;
+  } catch {
+    return "Historique journalier indisponible pour remonter plus loin.";
+  }
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const v = [...values].sort((a, b) => a - b);
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+function countBy(items, key) {
+  const m = new Map();
+  for (const it of items) m.set(key(it), (m.get(key(it)) || 0) + 1);
+  return m;
+}
+function fmtDuration(ms) {
+  const totalMin = Math.round(ms / MIN);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h ? (m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`) : `${m} min`;
+}
+const fmtDayTime = (t) => `${fmtDay(t)} ${fmtTime(t)}`;
+
 // --- suisse_chercher_stations ----------------------------------------------
 async function suisseChercherStations(args) {
   const riviere = clean(args.riviere);
@@ -863,6 +1046,9 @@ const timeFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, hour: "2-digit"
 const dateTimeFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 const dayFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit" });
 const keyFmt = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+const hourFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, hour: "numeric", hourCycle: "h23" });
+const weekdayFmt = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, weekday: "short" });
+const WEEKDAYS = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."];
 
 const fmtTime = (t) => timeFmt.format(t);
 const fmtDateTime = (t) => dateTimeFmt.format(t).replace(",", "");
